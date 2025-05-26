@@ -362,3 +362,7 @@ dump.rdb
 # Local development docker volumes
 postgres_data/
 redis_data/
+
+# Local documentation and planning files (keep these private)
+# First Product Chat Discussion.md
+# Product Requirements Document (PRD).md
