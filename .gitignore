@@ -22,6 +22,10 @@ coverage/
 # Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
 .grunt
 
+# Local documentation and planning files (keep these private)
+# First Product Chat Discussion.md
+# Product Requirements Document (PRD).md
+
 # Bower dependency directory (https://bower.io/)
 bower_components
 
@@ -364,5 +368,5 @@ postgres_data/
 redis_data/
 
 # Local documentation and planning files (keep these private)
-# First Product Chat Discussion.md
-# Product Requirements Document (PRD).md
+\# First Product Chat Discussion.md
+\# Product Requirements Document (PRD).md
