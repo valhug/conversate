@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/navigation/header";
 import { Footer } from "@/components/navigation/footer";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { AuthSessionProvider } from "@/components/providers/session-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,11 +36,13 @@ export default function RootLayout({
           defaultTheme="system"
           storageKey="conversate-ui-theme"
         >
-          <div className="flex min-h-screen flex-col">
-            <Header />
-            <main className="flex-1">{children}</main>
-            <Footer />
-          </div>
+          <AuthSessionProvider>
+            <div className="flex min-h-screen flex-col">
+              <Header />
+              <main className="flex-1">{children}</main>
+              <Footer />
+            </div>
+          </AuthSessionProvider>
         </ThemeProvider>
       </body>
     </html>

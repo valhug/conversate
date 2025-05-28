@@ -1,31 +1,18 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
 import { ProgressDashboard } from '@/components/progress/progress-dashboard';
-import { authService } from '@/lib/auth-service';
-import { User, LanguageCode } from '@conversate/shared';
+import { useSession } from 'next-auth/react';
+import { LanguageCode } from '@conversate/shared';
 
 export default function ProgressPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: session, status } = useSession();
 
-  useEffect(() => {
-    // Check if user is authenticated
-    const currentUser = authService.getCurrentUser();
-    if (!currentUser) {
-      // Redirect to login if not authenticated
-      router.push('/auth/login?redirect=/progress');
-      return;
-    }
-    setUser(currentUser);
-    setIsLoading(false);
-  }, [router]);
-
-  if (isLoading) {
+  if (status === 'loading') {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -36,12 +23,14 @@ export default function ProgressPage() {
     );
   }
 
-  if (!user) {
-    return null; // Will redirect in useEffect
+  if (status === 'unauthenticated') {
+    router.push('/auth/login?callbackUrl=/progress');
+    return null;
   }
 
-export default function ProgressPage() {
-  const router = useRouter();
+  if (!session?.user) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -58,11 +47,13 @@ export default function ProgressPage() {
           <h1 className="text-2xl font-bold">Learning Progress</h1>
           <div className="w-[100px]" /> {/* Spacer for center alignment */}
         </div>
-      </div>      {/* Progress Dashboard Content */}
+      </div>
+
+      {/* Progress Dashboard Content */}
       <div className="container mx-auto p-6">
         <ProgressDashboard 
-          userId={user!.id} 
-          language={(user!.targetLanguages[0] || 'en') as LanguageCode} 
+          userId={session.user.id!} 
+          language={'en' as LanguageCode} 
         />
       </div>
     </div>

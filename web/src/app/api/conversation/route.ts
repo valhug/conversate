@@ -3,7 +3,7 @@ import { conversationService } from '@/lib/conversation-service';
 import { claudeConversationService } from '@/lib/claude-conversation-service';
 import { mockConversationService } from '@/lib/mock-conversation-service';
 import { progressTrackingService } from '@/lib/progress-tracking-service';
-import { getUserFromHeaders } from '@/lib/jwt-utils';
+import { auth } from '@/lib/auth';
 import { ConversationRequest, ConversationMessage } from '@conversate/shared';
 
 // Service availability checks
@@ -16,9 +16,9 @@ const hasOpenAIKey = process.env.OPENAI_API_KEY &&
 
 export async function POST(request: NextRequest) {
   try {
-    // Get authenticated user from middleware headers
-    const user = getUserFromHeaders(request.headers);
-    if (!user) {
+    // Get authenticated user from Auth.js session
+    const session = await auth()
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -76,39 +76,39 @@ export async function POST(request: NextRequest) {
       response = await mockConversationService.generateResponse(body);
       serviceName = 'Mock';
     }
-    
-    console.log(`Conversation handled by: ${serviceName}`);
+      console.log(`Conversation handled by: ${serviceName}`);
       // Track progress after successful conversation
     try {
-      // Use authenticated user ID from middleware
-      const userId = user.userId;
+      // Use authenticated user ID from Auth.js session
+      const userId = session.user.id;
       const topic = body.topic || 'daily_life'; // Default topic if not provided
       
       // Always try to start session (it will handle duplicates internally)
-      const session = progressTrackingService.startSession(
+      const session_progress = progressTrackingService.startSession(
         userId,
         body.language,
         body.cefrLevel,
         topic
-      );// Track the user message
+      );
+
+      // Track the user message
       const userMessage: ConversationMessage = {
         id: `msg_${Date.now()}_user`,
-        sessionId: body.sessionId || session.id,
+        sessionId: body.sessionId || session_progress.id,
         speaker: 'user' as const,
         content: body.message,
         timestamp: new Date()
       };
-      progressTrackingService.addMessage(session.id, userMessage);
-      
-      // Track the AI response
+      progressTrackingService.addMessage(session_progress.id, userMessage);
+        // Track the AI response
       const aiMessage: ConversationMessage = {
         id: `msg_${Date.now()}_ai`,
-        sessionId: body.sessionId || session.id,
+        sessionId: body.sessionId || session_progress.id,
         speaker: 'ai' as const,
         content: response.message,
         timestamp: new Date()
       };
-      progressTrackingService.addMessage(session.id, aiMessage);
+      progressTrackingService.addMessage(session_progress.id, aiMessage);
       
     } catch (progressError) {
       console.warn('Progress tracking failed:', progressError);
@@ -127,9 +127,9 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Get authenticated user from middleware headers
-    const user = getUserFromHeaders(request.headers);
-    if (!user) {
+    // Get authenticated user from Auth.js session
+    const session = await auth()
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }

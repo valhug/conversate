@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { LanguageCode, ConversationTopic } from './constants';
 
 // User Types
 export const UserSchema = z.object({
@@ -45,25 +46,63 @@ export const AuthResponseSchema = z.object({
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
 
 // Conversation Types
-export const ConversationSchema = z.object({
-  id: z.string().uuid(),
-  title: z.string().min(1).max(255),
-  description: z.string().optional(),
-  languageCode: z.string(),
-  cefrLevel: z.enum(['A1', 'A2', 'B1', 'B2', 'C1', 'C2']),
-  topic: z.string(),
-  difficultyScore: z.number().min(1).max(10),
-  content: z.record(z.unknown()),
-  sourceType: z.enum(['generated', 'video', 'audio', 'text']),
-  sourceFileUrl: z.string().url().optional(),
-  transcription: z.record(z.unknown()).optional(),
-  audioSegments: z.array(z.record(z.unknown())).optional(),
-  createdBy: z.string().uuid(),
-  createdAt: z.date(),
-  isActive: z.boolean()
-});
+export interface Conversation {
+  id: string;
+  title: string;
+  description: string;
+  language: LanguageCode;
+  cefrLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+  topic: ConversationTopic;
+  difficulty: number; // 1-10 scale
+  estimatedDuration: number; // in minutes
+  tags: string[];
+  culturalContext?: string;
+  messages: ConversationMessage[];
+  createdAt: Date;
+  updatedAt: Date;
+}
 
-export type Conversation = z.infer<typeof ConversationSchema>;
+export interface ConversationRequest {
+  message: string;
+  conversationId?: string;
+  sessionId?: string;
+  language: LanguageCode;
+  cefrLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+  topic?: ConversationTopic;
+}
+
+export interface ConversationResponse {
+  message: string;
+  conversationId: string;
+  sessionId: string;
+  suggestions?: string[];
+  vocabularyWords?: VocabularyWord[];
+  comfortScoreUpdate?: number;
+}
+
+export interface VocabularyWord {
+  word: string;
+  translation: string;
+  context: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  partOfSpeech: string;
+}
+
+// Speech-to-Text Types
+export interface SpeechRecognitionResult {
+  transcript: string;
+  confidence: number;
+  language: LanguageCode;
+  duration: number;
+}
+
+export interface SpeechSynthesisRequest {
+  text: string;
+  language: LanguageCode;
+  voice?: string;
+  speed?: number; // 0.5 - 2.0
+  pitch?: number; // 0.0 - 2.0
+}
 
 // Session Types
 export const ConversationSessionSchema = z.object({

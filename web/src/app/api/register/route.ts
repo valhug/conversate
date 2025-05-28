@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { RegisterRequestSchema } from '@conversate/shared'
+import { hash } from 'bcryptjs'
+import { User, findUserByEmail, addUser } from '../auth/user-store'
+
+// In production, these would come from environment variables
+const SALT_ROUNDS = 12
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    
+    // Validate request data
+    const validationResult = RegisterRequestSchema.safeParse(body)
+    if (!validationResult.success) {
+      return NextResponse.json(
+        { 
+          error: 'Validation failed', 
+          details: validationResult.error.errors 
+        },
+        { status: 400 }
+      )
+    }
+
+    const { name, email, password, nativeLanguage, targetLanguages } = validationResult.data
+
+    // Check if user already exists
+    const existingUser = findUserByEmail(email)
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'User with this email already exists' },
+        { status: 409 }
+      )
+    }
+
+    // Hash password
+    const passwordHash = await hash(password, SALT_ROUNDS)
+
+    // Create new user
+    const newUser: User = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      email: email.toLowerCase(),
+      passwordHash,
+      nativeLanguage,
+      targetLanguages,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    // Store user (in production, save to database)
+    addUser(newUser)
+
+    // Return success response (exclude password hash)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash: _, ...userResponse } = newUser
+    
+    return NextResponse.json({
+      success: true,
+      user: userResponse,
+      message: 'Registration successful'
+    })
+
+  } catch (error) {
+    console.error('Registration error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
