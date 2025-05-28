@@ -2,12 +2,15 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button, Input, Label, Card, CardHeader, CardContent, CardTitle } from "@conversate/ui"
 import { LanguageSelect } from "../../../components/ui/language-select"
 import { MultiLanguageSelect } from "../../../components/ui/multi-language-select"
 import { RegisterRequest, RegisterRequestSchema } from "@conversate/shared"
+import { authService } from "../../../lib/auth-service"
 
 export default function RegisterPage() {
+  const router = useRouter()
   const [formData, setFormData] = useState<Omit<RegisterRequest, "targetLanguages"> & { 
     targetLanguages: string[];
     confirmPassword: string;
@@ -21,6 +24,7 @@ export default function RegisterPage() {
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
+  
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
 
@@ -63,24 +67,26 @@ export default function RegisterPage() {
     setErrors({})
     
     try {
-      // TODO: Implement actual registration logic with API call
-      console.log("Registration attempt:", {
+      const registrationData: RegisterRequest = {
         name: formData.name,
         email: formData.email,
         password: formData.password,
         nativeLanguage: formData.nativeLanguage,
         targetLanguages: formData.targetLanguages
-      })
+      }
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const result = await authService.register(registrationData)
       
-      // TODO: Handle successful registration (redirect, etc.)
-      alert("Registration successful! (This is a placeholder)")
+      if (result.success) {
+        // Redirect to conversation page on successful registration
+        router.push('/conversation')
+      } else {
+        setErrors({ submit: result.error || "Registration failed. Please try again." })
+      }
       
     } catch (error) {
       console.error("Registration error:", error)
-      setErrors({ submit: "Registration failed. Please try again." })
+      setErrors({ submit: "Network error. Please try again." })
     } finally {
       setIsLoading(false)
     }

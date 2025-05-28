@@ -2,10 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button, Input, Label, Card, CardHeader, CardContent, CardTitle } from "@conversate/ui"
 import { LoginRequest, LoginRequestSchema } from "@conversate/shared"
+import { authService } from "../../../lib/auth-service"
 
 export default function LoginPage() {
+  const router = useRouter()
   const [formData, setFormData] = useState<LoginRequest>({
     email: "",
     password: ""
@@ -43,18 +46,18 @@ export default function LoginPage() {
     setErrors({})
     
     try {
-      // TODO: Implement actual login logic with API call
-      console.log("Login attempt:", formData)
+      const result = await authService.login(formData)
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // TODO: Handle successful login (redirect, set auth state, etc.)
-      alert("Login successful! (This is a placeholder)")
+      if (result.success) {
+        // Redirect to dashboard or home page on successful login
+        router.push('/conversation')
+      } else {
+        setErrors({ submit: result.error || "Login failed. Please check your credentials and try again." })
+      }
       
     } catch (error) {
       console.error("Login error:", error)
-      setErrors({ submit: "Login failed. Please check your credentials and try again." })
+      setErrors({ submit: "Network error. Please try again." })
     } finally {
       setIsLoading(false)
     }

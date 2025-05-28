@@ -25,6 +25,19 @@ export function Header() {
                   Home
                 </Link>
               </NavigationMenuLink>
+            </NavigationMenuItem>            <NavigationMenuItem>
+              <NavigationMenuLink asChild>
+                <Link href="/conversation" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Practice
+                </Link>
+              </NavigationMenuLink>
+            </NavigationMenuItem>
+            <NavigationMenuItem>
+              <NavigationMenuLink asChild>
+                <Link href="/progress" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Progress
+                </Link>
+              </NavigationMenuLink>
             </NavigationMenuItem>
             <NavigationMenuItem>
               <NavigationMenuLink asChild>
