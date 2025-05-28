@@ -3,6 +3,7 @@ import { conversationService } from '@/lib/conversation-service';
 import { claudeConversationService } from '@/lib/claude-conversation-service';
 import { mockConversationService } from '@/lib/mock-conversation-service';
 import { progressTrackingService } from '@/lib/progress-tracking-service';
+import { getUserFromHeaders } from '@/lib/jwt-utils';
 import { ConversationRequest, ConversationMessage } from '@conversate/shared';
 
 // Service availability checks
@@ -15,6 +16,15 @@ const hasOpenAIKey = process.env.OPENAI_API_KEY &&
 
 export async function POST(request: NextRequest) {
   try {
+    // Get authenticated user from middleware headers
+    const user = getUserFromHeaders(request.headers);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
     const body: ConversationRequest = await request.json();
     
     // Validate required fields
@@ -68,11 +78,10 @@ export async function POST(request: NextRequest) {
     }
     
     console.log(`Conversation handled by: ${serviceName}`);
-    
-    // Track progress after successful conversation
+      // Track progress after successful conversation
     try {
-      // For new conversations, start a session. For existing ones, just track the message
-      const userId = 'user_' + (body.sessionId || body.conversationId || 'anonymous');
+      // Use authenticated user ID from middleware
+      const userId = user.userId;
       const topic = body.topic || 'daily_life'; // Default topic if not provided
       
       // Always try to start session (it will handle duplicates internally)
@@ -81,7 +90,7 @@ export async function POST(request: NextRequest) {
         body.language,
         body.cefrLevel,
         topic
-      );      // Track the user message
+      );// Track the user message
       const userMessage: ConversationMessage = {
         id: `msg_${Date.now()}_user`,
         sessionId: body.sessionId || session.id,
@@ -118,6 +127,15 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    // Get authenticated user from middleware headers
+    const user = getUserFromHeaders(request.headers);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const conversationId = searchParams.get('conversationId');
     const sessionId = searchParams.get('sessionId');

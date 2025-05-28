@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { LoginRequest, LoginRequestSchema } from '@conversate/shared'
 import { compare } from 'bcryptjs'
-import { sign } from 'jsonwebtoken'
+import { generateToken } from '@/lib/jwt-utils'
 import { findUserByEmail, updateUser } from '../user-store'
-
-// In production, these would come from environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key'
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,26 +36,19 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid email or password' },
         { status: 401 }
       )
-    }
-
-    // Generate JWT token
-    const token = sign(
-      { 
-        userId: user.id, 
-        email: user.email,
-        name: user.name,
-        nativeLanguage: user.nativeLanguage,
-        targetLanguages: user.targetLanguages
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    )
+    }    // Generate JWT token
+    const token = generateToken({
+      userId: user.id, 
+      email: user.email,
+      name: user.name,
+      nativeLanguage: user.nativeLanguage,
+      targetLanguages: user.targetLanguages
+    })
 
     // Update last login time
-    updateUser(user.id, { updatedAt: new Date() })
-
-    // Return success response (exclude password hash)
-    const { passwordHash, ...userResponse } = user
+    updateUser(user.id, { updatedAt: new Date() })    // Return success response (exclude password hash)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash: _, ...userResponse } = user
     
     return NextResponse.json({
       success: true,

@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RegisterRequest, RegisterRequestSchema } from '@conversate/shared'
 import { hash } from 'bcryptjs'
-import { sign } from 'jsonwebtoken'
+import { generateToken } from '@/lib/jwt-utils'
 import { User, findUserByEmail, addUser } from '../user-store'
 
 // In production, these would come from environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key'
 const SALT_ROUNDS = 12
 
 export async function POST(request: NextRequest) {
@@ -49,22 +48,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Store user (in production, save to database)
-    addUser(newUser)
-
-    // Generate JWT token
-    const token = sign(
-      { 
-        userId: newUser.id, 
-        email: newUser.email,
-        name: newUser.name,
-        nativeLanguage: newUser.nativeLanguage,
-        targetLanguages: newUser.targetLanguages
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    )
-
-    // Return success response (exclude password hash)
+    addUser(newUser)    // Generate JWT token
+    const token = generateToken({
+      userId: newUser.id, 
+      email: newUser.email,
+      name: newUser.name,
+      nativeLanguage: newUser.nativeLanguage,
+      targetLanguages: newUser.targetLanguages
+    })    // Return success response (exclude password hash)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { passwordHash: _, ...userResponse } = newUser
     
     return NextResponse.json({
