@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ConversationRequest, ConversationResponse, ConversationMessage, LanguageCode, VocabularyWord } from '@conversate/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { conversationService as dbConversationService, messageService } from './database';
 
 class ClaudeConversationService {
   private anthropic: Anthropic;
-  private conversationHistory: Map<string, ConversationMessage[]> = new Map();
 
   constructor() {
     this.anthropic = new Anthropic({
@@ -12,32 +12,46 @@ class ClaudeConversationService {
     });
   }
 
-  async generateResponse(request: ConversationRequest): Promise<ConversationResponse> {
+  async generateResponse(request: ConversationRequest, userId?: string): Promise<ConversationResponse> {
     try {
       const sessionId = request.sessionId || uuidv4();
-      const conversationId = request.conversationId || uuidv4();
+      let conversationId = request.conversationId;
       
-      // Get conversation history
-      const historyKey = `${conversationId}-${sessionId}`;
-      const history = this.conversationHistory.get(historyKey) || [];
-        // Add user message to history
-      const userMessage: ConversationMessage = {
-        id: uuidv4(),
-        sessionId: sessionId,
-        speaker: 'user',
-        content: request.message,
-        timestamp: new Date(),
-      };
-      history.push(userMessage);
+      // Create or get conversation from database
+      if (!conversationId && userId) {
+        const conversation = await dbConversationService.create(userId, {
+          title: request.topic || 'New Conversation',
+          language: request.language,
+          level: request.cefrLevel,
+          aiProvider: 'anthropic'
+        });
+        conversationId = conversation.id;
+      }
+      
+      // Get conversation history from database
+      const history = conversationId ? await messageService.findByConversationId(conversationId) : [];
+      
+      // Add user message to database
+      if (conversationId) {
+        await messageService.create(conversationId, {
+          role: 'USER',
+          content: request.message,
+        });
+      }
       
       // Create system prompt based on language level and topic
       const systemPrompt = this.createSystemPrompt(request.language, request.cefrLevel, request.topic);
-      
-      // Prepare messages for Claude
-      const messages: Anthropic.Messages.MessageParam[] = history.slice(-10).map(msg => ({
-        role: msg.speaker === 'user' ? 'user' : 'assistant',
-        content: msg.content,
-      }));
+        // Prepare messages for Claude
+      const messages: Anthropic.Messages.MessageParam[] = [
+        ...history.slice(-10).map(msg => ({
+          role: (msg.role === 'USER' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: msg.content,
+        })),
+        {
+          role: 'user' as const,
+          content: request.message,
+        }
+      ];
 
       // Generate AI response
       const completion = await this.anthropic.messages.create({
@@ -46,30 +60,23 @@ class ClaudeConversationService {
         temperature: 0.7,
         system: systemPrompt,
         messages,
-      });
-
-      const aiResponseContent = completion.content[0]?.type === 'text' 
+      });      const aiResponseContent = completion.content[0]?.type === 'text'
         ? completion.content[0].text 
         : 'I apologize, but I couldn\'t generate a response. Please try again.';
-        // Add AI response to history
-      const aiMessage: ConversationMessage = {
-        id: uuidv4(),
-        sessionId: sessionId,
-        speaker: 'ai',
-        content: aiResponseContent,
-        timestamp: new Date(),
-      };
-      history.push(aiMessage);
       
-      // Update conversation history
-      this.conversationHistory.set(historyKey, history);
+      // Add AI response to database
+      if (conversationId) {
+        await messageService.create(conversationId, {
+          role: 'ASSISTANT',
+          content: aiResponseContent,
+        });
+      }
       
       // Extract vocabulary words
       const vocabularyWords = this.extractVocabulary(aiResponseContent);
-      
-      return {
+        return {
         message: aiResponseContent,
-        conversationId,
+        conversationId: conversationId || uuidv4(),
         sessionId,
         vocabularyWords,
         suggestions: this.generateSuggestions(request.cefrLevel),
@@ -167,15 +174,28 @@ Guidelines:
 
     return suggestions[level] || suggestions['A1'];
   }
-
-  getConversationHistory(conversationId: string, sessionId: string): ConversationMessage[] {
-    const historyKey = `${conversationId}-${sessionId}`;
-    return this.conversationHistory.get(historyKey) || [];
+  async getConversationHistory(conversationId: string): Promise<ConversationMessage[]> {
+    try {
+      const messages = await messageService.findByConversationId(conversationId);
+      return messages.map(msg => ({
+        id: msg.id,
+        sessionId: conversationId, // Use conversationId as sessionId for compatibility
+        speaker: msg.role === 'USER' ? 'user' : 'ai',
+        content: msg.content,
+        timestamp: msg.timestamp,
+      }));
+    } catch (error) {
+      console.error('Error fetching conversation history:', error);
+      return [];
+    }
   }
 
-  clearConversationHistory(conversationId: string, sessionId: string): void {
-    const historyKey = `${conversationId}-${sessionId}`;
-    this.conversationHistory.delete(historyKey);
+  async clearConversationHistory(conversationId: string): Promise<void> {
+    try {
+      await messageService.deleteByConversationId(conversationId);
+    } catch (error) {
+      console.error('Error clearing conversation history:', error);
+    }
   }
 }
 

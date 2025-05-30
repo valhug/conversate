@@ -13,3 +13,333 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// User Management (Auth.js compatible)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id                    String               @id @default(cuid())
+  name                  String?
+  email                 String               @unique
+  emailVerified         DateTime?
+  image                 String?
+  hashedPassword        String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  
+  // Language Learning Profile
+  nativeLanguage        String               @default("en")
+  targetLanguage        String               @default("es")
+  currentLevel          String               @default("A1") // CEFR levels: A1, A2, B1, B2, C1, C2
+  learningGoals         String[]             @default([])
+  preferredTopics       String[]             @default([])
+  
+  // User Preferences
+  preferredPersonas     String[]             @default([]) // Future: AI persona preferences
+  voiceSettings         Json?                              // TTS/STT preferences
+  notificationSettings  Json?
+  
+  // Relations
+  accounts              Account[]
+  sessions              Session[]
+  conversations         Conversation[]
+  uploadedFiles         UploadedFile[]
+  progressEntries       ProgressEntry[]
+  vocabularyEntries     VocabularyEntry[]
+  achievements          UserAchievement[]
+  personaInteractions   PersonaInteraction[] // Future: persona system
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+// Conversation Management
+model Conversation {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String?
+  language    String   @default("es")
+  level       String   @default("A1")
+  status      ConversationStatus @default(ACTIVE)
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  
+  // Conversation Metadata
+  totalMessages     Int    @default(0)
+  totalDuration     Int    @default(0) // in seconds
+  wordsLearned      Int    @default(0)
+  errorsCorreected  Int    @default(0)
+  
+  // AI/Persona Information
+  aiProvider        String?           // "openai", "anthropic", "custom", etc.
+  personaUsed       String?           // Future: persona system
+  
+  // Relations
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages          ConversationMessage[]
+  progressEntries   ProgressEntry[]
+  vocabularyEntries VocabularyEntry[]
+
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String       @db.Text
+  timestamp      DateTime     @default(now())
+  
+  // Message Analysis
+  grammarErrors  Json?        // Array of grammar issues found
+  newVocabulary  Json?        // New words/phrases introduced
+  corrections    Json?        // Corrections made by AI
+  confidence     Float?       // AI confidence in response (0-1)
+  
+  // Speech/Audio Metadata
+  audioUrl       String?      // URL to audio file if speech-based
+  speechDuration Int?         // Duration in seconds
+  speechQuality  Float?       // Speech recognition confidence
+  
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("conversation_messages")
+}
+
+// File Upload System
+model UploadedFile {
+  id              String       @id @default(cuid())
+  userId          String
+  fileName        String
+  originalName    String
+  fileSize        Int
+  mimeType        String
+  fileUrl         String
+  uploadedAt      DateTime     @default(now())
+  
+  // Processing Status
+  status          FileStatus   @default(UPLOADED)
+  processingError String?
+  processedAt     DateTime?
+  
+  // File Analysis Results
+  extractedText   String?      @db.Text
+  language        String?
+  complexity      String?      // A1, A2, B1, B2, C1, C2
+  topics          String[]     @default([])
+  vocabulary      Json?        // Extracted vocabulary with definitions
+  
+  // Content Metadata
+  duration        Int?         // For audio/video files (seconds)
+  transcription   String?      @db.Text
+  
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("uploaded_files")
+}
+
+// Progress Tracking System
+model ProgressEntry {
+  id             String       @id @default(cuid())
+  userId         String
+  conversationId String?
+  date           DateTime     @default(now())
+  
+  // Skill Metrics (0-100 scale)
+  speakingScore      Int?
+  listeningScore     Int?
+  readingScore       Int?
+  writingScore       Int?
+  grammarScore       Int?
+  vocabularyScore    Int?
+  pronunciationScore Int?
+  
+  // Learning Activities
+  wordsLearned       Int      @default(0)
+  mistakesCorrected  Int      @default(0)
+  conversationTime   Int      @default(0) // minutes
+  
+  // CEFR Level Progress
+  currentLevel       String
+  progressToNext     Float    @default(0) // 0-1 progress to next level
+  
+  // Session Context
+  sessionType        String?  // "conversation", "file_review", "vocabulary_practice"
+  
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation       Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@map("progress_entries")
+}
+
+// Vocabulary Management
+model VocabularyEntry {
+  id                String       @id @default(cuid())
+  userId            String
+  conversationId    String?
+  
+  // Word/Phrase Details
+  word              String
+  translation       String
+  definition        String?      @db.Text
+  pronunciation     String?      // IPA or phonetic representation
+  language          String       @default("es")
+  
+  // Learning Context
+  contextSentence   String?      @db.Text
+  difficulty        String       @default("A1")
+  category          String?      // "travel", "business", "casual", etc.
+  
+  // Learning Progress
+  timesEncountered  Int          @default(1)
+  timesCorrect      Int          @default(0)
+  lastEncountered   DateTime     @default(now())
+  masteryLevel      Float        @default(0) // 0-1 scale
+  
+  // Relations
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation      Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, word, language])
+  @@map("vocabulary_entries")
+}
+
+// Achievement System
+model Achievement {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  description String            @db.Text
+  category    String            // "conversation", "vocabulary", "grammar", "streak", etc.
+  icon        String?
+  points      Int               @default(0)
+  difficulty  String            @default("easy") // easy, medium, hard, epic
+  
+  // Achievement Criteria (stored as JSON)
+  criteria    Json              // Flexible criteria definition
+  
+  users       UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  progress      Float       @default(1) // 0-1, for progressive achievements
+  
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// Future: Custom LLM Persona System (Session #2)
+model Persona {
+  id               String               @id @default(cuid())
+  name             String               @unique
+  displayName      String
+  description      String               @db.Text
+  
+  // Personality Traits
+  traits           Json                 // Personality characteristics
+  conversationStyle Json                // How they communicate
+  expertise        String[]             @default([]) // Topics they're good at
+  
+  // Technical Configuration
+  systemPrompt     String               @db.Text
+  temperature      Float                @default(0.7)
+  maxTokens        Int                  @default(150)
+  
+  // Usage Analytics
+  totalInteractions Int                 @default(0)
+  averageRating     Float?
+  isActive          Boolean             @default(true)
+  
+  // Relations
+  interactions     PersonaInteraction[]
+
+  @@map("personas")
+}
+
+model PersonaInteraction {
+  id          String   @id @default(cuid())
+  userId      String
+  personaId   String
+  
+  // Interaction Details
+  duration    Int      // seconds
+  messages    Int      @default(0)
+  rating      Int?     // 1-5 user rating
+  feedback    String?  @db.Text
+  
+  // Learning Outcomes
+  wordsLearned     Int @default(0)
+  mistakesCorrected Int @default(0)
+  
+  timestamp   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  persona     Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@map("persona_interactions")
+}
+
+// Enums
+enum ConversationStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  ARCHIVED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum FileStatus {
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  ERROR
+}

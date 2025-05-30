@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RegisterRequestSchema } from '@conversate/shared'
 import { hash } from 'bcryptjs'
-import { User, findUserByEmail, addUser } from '../auth/user-store'
+import { userService } from '@/lib/database'
+import { syncUserFromRegistration } from '../auth/user-store'
 
 // In production, these would come from environment variables
 const SALT_ROUNDS = 12
@@ -20,12 +21,10 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
-    }
-
-    const { name, email, password, nativeLanguage, targetLanguages } = validationResult.data
+    }    const { name, email, password, nativeLanguage, targetLanguages } = validationResult.data
 
     // Check if user already exists
-    const existingUser = findUserByEmail(email)
+    const existingUser = await userService.findByEmail(email)
     if (existingUser) {
       return NextResponse.json(
         { error: 'User with this email already exists' },
@@ -34,30 +33,39 @@ export async function POST(request: NextRequest) {
     }
 
     // Hash password
-    const passwordHash = await hash(password, SALT_ROUNDS)
-
-    // Create new user
-    const newUser: User = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    const passwordHash = await hash(password, SALT_ROUNDS)    // Create new user using database service
+    const newUser = await userService.create({
       name,
       email: email.toLowerCase(),
-      passwordHash,
+      hashedPassword: passwordHash,
       nativeLanguage,
-      targetLanguages,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
+      targetLanguage: targetLanguages[0] || 'es', // Use first target language as primary
+    })    // Update user with learning goals (multiple target languages)
+    const updatedUser = await userService.update(newUser.id, {
+      learningGoals: targetLanguages,
+    })
 
-    // Store user (in production, save to database)
-    addUser(newUser)
+    // Sync user to Edge Runtime compatible user-store for Auth.js
+    syncUserFromRegistration({
+      email: updatedUser.email,
+      name: updatedUser.name || '',
+      hashedPassword: passwordHash,
+      nativeLanguage: updatedUser.nativeLanguage,
+      targetLanguages: updatedUser.learningGoals,
+    })
 
-    // Return success response (exclude password hash)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { passwordHash: _, ...userResponse } = newUser
-    
+    // Return success response
     return NextResponse.json({
       success: true,
-      user: userResponse,
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        nativeLanguage: updatedUser.nativeLanguage,
+        targetLanguages: updatedUser.learningGoals,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt,
+      },
       message: 'Registration successful'
     })
 

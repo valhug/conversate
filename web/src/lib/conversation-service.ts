@@ -1,10 +1,10 @@
 import OpenAI from 'openai';
 import { ConversationRequest, ConversationResponse, ConversationMessage, LanguageCode, VocabularyWord } from '@conversate/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { conversationService as dbConversationService, messageService } from './database';
 
 class ConversationService {
   private openai: OpenAI;
-  private conversationHistory: Map<string, ConversationMessage[]> = new Map();
 
   constructor() {
     this.openai = new OpenAI({
@@ -12,23 +12,31 @@ class ConversationService {
     });
   }
 
-  async generateResponse(request: ConversationRequest): Promise<ConversationResponse> {
+  async generateResponse(request: ConversationRequest, userId?: string): Promise<ConversationResponse> {
     try {
       const sessionId = request.sessionId || uuidv4();
-      const conversationId = request.conversationId || uuidv4();
+      let conversationId = request.conversationId;
       
-      // Get conversation history
-      const historyKey = `${conversationId}-${sessionId}`;
-      const history = this.conversationHistory.get(historyKey) || [];
-        // Add user message to history
-      const userMessage: ConversationMessage = {
-        id: uuidv4(),
-        sessionId: sessionId,
-        speaker: 'user',
-        content: request.message,
-        timestamp: new Date(),
-      };
-      history.push(userMessage);
+      // Create or get conversation from database
+      if (!conversationId && userId) {
+        const conversation = await dbConversationService.create(userId, {
+          title: request.topic || 'New Conversation',
+          language: request.language,
+          level: request.cefrLevel,
+          aiProvider: 'openai'
+        });
+        conversationId = conversation.id;
+      }
+      
+      // Get conversation history from database
+      const history = conversationId ? await messageService.findByConversationId(conversationId) : [];
+        // Add user message to database
+      if (conversationId) {
+        await messageService.create(conversationId, {
+          role: 'USER',
+          content: request.message,
+        });
+      }
       
       // Create system prompt based on language level and topic
       const systemPrompt = this.createSystemPrompt(request.language, request.cefrLevel, request.topic);
@@ -37,10 +45,12 @@ class ConversationService {
       const messages = [
         { role: 'system', content: systemPrompt },
         ...history.slice(-10).map(msg => ({ // Keep last 10 messages for context
-          role: msg.speaker === 'user' ? 'user' : 'assistant',
+          role: msg.role === 'USER' ? 'user' : 'assistant',
           content: msg.content,
         })),
-      ];// Generate AI response
+        { role: 'user', content: request.message }      ];
+
+      // Generate AI response
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: messages.map(msg => ({
@@ -52,28 +62,23 @@ class ConversationService {
       });
 
       const aiResponseContent = completion.choices[0]?.message?.content || 'I apologize, but I couldn\'t generate a response. Please try again.';
-        // Add AI response to history
-      const aiMessage: ConversationMessage = {
-        id: uuidv4(),
-        sessionId: sessionId,
-        speaker: 'ai',
-        content: aiResponseContent,
-        timestamp: new Date(),
-      };
-      history.push(aiMessage);
+        // Add AI response to database
+      if (conversationId) {
+        await messageService.create(conversationId, {
+          role: 'ASSISTANT',
+          content: aiResponseContent,
+        });
+      }
       
-      // Update conversation history
-      this.conversationHistory.set(historyKey, history);
-        // Extract vocabulary words (simple implementation for now)
+      // Extract vocabulary words (simple implementation for now)
       const vocabularyWords = this.extractVocabulary(aiResponseContent);
-      
-      return {
+        return {
         message: aiResponseContent,
-        conversationId,
+        conversationId: conversationId || uuidv4(),
         sessionId,
         vocabularyWords,
         suggestions: this.generateSuggestions(request.cefrLevel),
-      };    } catch (error) {
+      };} catch (error) {
       console.error('Error generating conversation response:', error);
       // Re-throw the original error so the API route can handle fallback logic
       throw error;
@@ -164,15 +169,28 @@ Guidelines:
 
     return suggestions[level] || suggestions['A1'];
   }
-
-  getConversationHistory(conversationId: string, sessionId: string): ConversationMessage[] {
-    const historyKey = `${conversationId}-${sessionId}`;
-    return this.conversationHistory.get(historyKey) || [];
+  async getConversationHistory(conversationId: string): Promise<ConversationMessage[]> {
+    try {
+      const messages = await messageService.findByConversationId(conversationId);
+      return messages.map(msg => ({
+        id: msg.id,
+        sessionId: conversationId, // Use conversationId as sessionId for compatibility
+        speaker: msg.role === 'USER' ? 'user' : 'ai',
+        content: msg.content,
+        timestamp: msg.timestamp,
+      }));
+    } catch (error) {
+      console.error('Error fetching conversation history:', error);
+      return [];
+    }
   }
 
-  clearConversationHistory(conversationId: string, sessionId: string): void {
-    const historyKey = `${conversationId}-${sessionId}`;
-    this.conversationHistory.delete(historyKey);
+  async clearConversationHistory(conversationId: string): Promise<void> {
+    try {
+      await messageService.deleteByConversationId(conversationId);
+    } catch (error) {
+      console.error('Error clearing conversation history:', error);
+    }
   }
 }
 

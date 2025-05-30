@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+import type { FileRecord, ConversationSegment } from '@/types/upload';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/mov', 'video/avi', 'video/webm'];
@@ -49,9 +50,7 @@ export async function POST(request: NextRequest) {
         { error: 'Unsupported file type' },
         { status: 400 }
       );
-    }
-
-    // Determine file category
+    }    // Determine file category
     let fileCategory: 'video' | 'audio' | 'text';
     if (ALLOWED_VIDEO_TYPES.includes(file.type)) {
       fileCategory = 'video';
@@ -63,8 +62,6 @@ export async function POST(request: NextRequest) {
 
     // Generate unique filename
     const timestamp = Date.now();
-    const extension = file.name.split('.').pop() || '';
-    const fileName = `${session.user.id}_${timestamp}.${extension}`;
 
     // For now, store file as base64 in memory (in production, use cloud storage)
     const buffer = await file.arrayBuffer();
@@ -109,7 +106,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Simplified background processing (in production, use job queue)
-async function processFileInBackground(fileRecord: any) {
+async function processFileInBackground(fileRecord: FileRecord) {
   try {
     console.log(`Processing file: ${fileRecord.fileName}`);
     
@@ -133,17 +130,7 @@ async function processFileInBackground(fileRecord: any) {
       extractedContent,
       fileRecord.language,
       fileRecord.cefrLevel
-    );
-
-    // Store processed content (in memory for demo)
-    const processedFile = {
-      ...fileRecord,
-      processingStatus: 'completed' as const,
-      extractedContent,
-      conversations,
-      processedAt: new Date(),
-    };
-
+    );    // Store processed content (in memory for demo)
     // In production, save to database
     console.log(`File processing completed: ${fileRecord.fileName}`);
     console.log(`Generated ${conversations.length} conversation segments`);
@@ -163,7 +150,7 @@ async function generateConversationsFromContent(
   content: string,
   language: string,
   cefrLevel: string
-): Promise<any[]> {
+): Promise<ConversationSegment[]> {
   // Simple conversation segmentation
   const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 10);
   const conversations = [];

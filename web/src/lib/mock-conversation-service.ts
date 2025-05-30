@@ -956,13 +956,18 @@ class MockConversationService {
 
     return suggestions[level] || suggestions['A1'];
   }
-
-  getConversationHistory(conversationId: string, sessionId: string): ConversationMessage[] {
+  async getConversationHistory(conversationId: string): Promise<ConversationMessage[]> {
+    // For consistency with database services, only use conversationId
+    // Create a default sessionId if needed
+    const sessionId = 'mock-session';
     const historyKey = `${conversationId}-${sessionId}`;
     return this.conversationHistory.get(historyKey) || [];
   }
 
-  clearConversationHistory(conversationId: string, sessionId: string): void {
+  async clearConversationHistory(conversationId: string): Promise<void> {
+    // For consistency with database services, only use conversationId
+    // Create a default sessionId if needed
+    const sessionId = 'mock-session';
     const historyKey = `${conversationId}-${sessionId}`;
     this.conversationHistory.delete(historyKey);
   }

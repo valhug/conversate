@@ -37,19 +37,21 @@ export async function POST(request: NextRequest) {
 
     let response;
     let serviceName = '';
-    
+      // Get userId from authenticated session
+    const userId = session.user.id!;
+
     // Try services in priority order: Claude > OpenAI > Mock
     if (hasClaudeKey) {
       try {
         console.log('Attempting Claude conversation service...');
-        response = await claudeConversationService.generateResponse(body);
+        response = await claudeConversationService.generateResponse(body, userId);
         serviceName = 'Claude';
       } catch (error) {
         console.warn('Claude service failed, trying OpenAI:', error);
         
         if (hasOpenAIKey) {
           try {
-            response = await conversationService.generateResponse(body);
+            response = await conversationService.generateResponse(body, userId);
             serviceName = 'OpenAI';
           } catch (openAIError) {
             console.warn('OpenAI service failed, falling back to mock:', openAIError);
@@ -64,13 +66,14 @@ export async function POST(request: NextRequest) {
     } else if (hasOpenAIKey) {
       try {
         console.log('Attempting OpenAI conversation service...');
-        response = await conversationService.generateResponse(body);
+        response = await conversationService.generateResponse(body, userId);
         serviceName = 'OpenAI';
       } catch (error) {
         console.warn('OpenAI service failed, falling back to mock:', error);
         response = await mockConversationService.generateResponse(body);
         serviceName = 'Mock';
-      }    } else {
+      }
+    } else {
       // No API keys available, use mock service
       console.log('No API keys available, using mock service');
       response = await mockConversationService.generateResponse(body);
@@ -138,11 +141,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const conversationId = searchParams.get('conversationId');
-    const sessionId = searchParams.get('sessionId');
     
-    if (!conversationId || !sessionId) {
+    if (!conversationId) {
       return NextResponse.json(
-        { error: 'Missing required parameters: conversationId or sessionId' },
+        { error: 'Missing required parameter: conversationId' },
         { status: 400 }
       );
     }
@@ -157,7 +159,7 @@ export async function GET(request: NextRequest) {
       service = mockConversationService;
     }
     
-    const history = service.getConversationHistory(conversationId, sessionId);
+    const history = await service.getConversationHistory(conversationId);
     
     return NextResponse.json({ history });
   } catch (error) {
