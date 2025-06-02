@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
-import { UserIcon, LogOutIcon, SettingsIcon } from "lucide-react"
+import { UserIcon, LogOutIcon, SettingsIcon, Upload } from "lucide-react"
 
 export function Header() {
   const { data: session, status } = useSession()
@@ -41,14 +41,20 @@ export function Header() {
                 </Link>
               </NavigationMenuLink>
             </NavigationMenuItem>
-            
-            {/* Show Practice and Progress only for authenticated users */}
+              {/* Show Practice, Upload, and Progress only for authenticated users */}
             {user && (
               <>
                 <NavigationMenuItem>
                   <NavigationMenuLink asChild>
                     <Link href="/conversation" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                       Practice
+                    </Link>
+                  </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink asChild>
+                    <Link href="/upload" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                      Upload
                     </Link>
                   </NavigationMenuLink>
                 </NavigationMenuItem>
@@ -105,12 +111,17 @@ export function Header() {
                     <p className="text-sm font-medium">{user.name}</p>
                     <p className="text-xs text-muted-foreground">{user.email}</p>
                   </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
+                </DropdownMenuLabel>                <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link href="/progress" className="flex items-center gap-2">
                     <SettingsIcon className="h-4 w-4" />
                     <span>Progress</span>
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/upload" className="flex items-center gap-2">
+                    <Upload className="h-4 w-4" />
+                    <span>Upload</span>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

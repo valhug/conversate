@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import type { FileRecord, ConversationSegment } from '@/types/upload';
+import { cloudStorageService } from '@/lib/cloud-storage-service';
+import { audioProcessingService } from '@/lib/audio-processing-service';
+import { speechToTextService } from '@/lib/speech-to-text-service';
+import { contentAnalysisService } from '@/lib/content-analysis-service';
+import type { FileRecord } from '@/types/upload';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/mov', 'video/avi', 'video/webm'];
@@ -50,7 +54,9 @@ export async function POST(request: NextRequest) {
         { error: 'Unsupported file type' },
         { status: 400 }
       );
-    }    // Determine file category
+    }
+
+    // Determine file category
     let fileCategory: 'video' | 'audio' | 'text';
     if (ALLOWED_VIDEO_TYPES.includes(file.type)) {
       fileCategory = 'video';
@@ -60,32 +66,46 @@ export async function POST(request: NextRequest) {
       fileCategory = 'text';
     }
 
-    // Generate unique filename
+    // Generate unique filename and file ID
     const timestamp = Date.now();
+    const fileId = `file_${timestamp}`;
+    const fileKey = `uploads/${session.user.id}/${fileId}_${file.name}`;
 
-    // For now, store file as base64 in memory (in production, use cloud storage)
+    // Convert file to buffer for processing
     const buffer = await file.arrayBuffer();
-    const base64File = Buffer.from(buffer).toString('base64');
+    const fileBuffer = Buffer.from(buffer);    // Upload file to cloud storage
+    const uploadResult = await cloudStorageService.uploadFile(
+      fileBuffer,
+      fileKey,
+      file.type
+    );
+
+    if (!uploadResult.success) {
+      return NextResponse.json(
+        { error: uploadResult.error || 'Failed to upload file to cloud storage' },
+        { status: 500 }
+      );
+    }
 
     // Create file record
     const fileRecord = {
-      id: `file_${timestamp}`,
+      id: fileId,
       userId: session.user.id,
       fileName: file.name,
       originalName: file.name,
       fileType: fileCategory,
       fileSize: file.size,
       mimeType: file.type,
-      base64Data: base64File, // In production, this would be a storage URL
+      storageUrl: uploadResult.fileUrl!,
+      storageKey: uploadResult.fileKey!,
       language: language || 'en',
       cefrLevel: cefrLevel || 'A1',
       processingStatus: 'uploaded' as const,
       uploadedAt: new Date(),
-    };
-
-    // Start processing in background (simplified for demo)
-    // In production, this would trigger a background job
-    processFileInBackground(fileRecord);
+    };    // Start processing in background
+    processFileInBackground(fileRecord, fileBuffer).catch(error => {
+      console.error('Background processing failed:', error);
+    });
 
     return NextResponse.json({
       success: true,
@@ -105,92 +125,168 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Simplified background processing (in production, use job queue)
-async function processFileInBackground(fileRecord: FileRecord) {
+// Real background processing with cloud storage and speech-to-text
+async function processFileInBackground(fileRecord: FileRecord, fileBuffer: Buffer) {
   try {
     console.log(`Processing file: ${fileRecord.fileName}`);
     
-    // Simulate processing delay
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Extract content based on file type
     let extractedContent = '';
-    
+    let speakerTurns: Array<{
+      speaker: string;
+      text: string;
+      startTime: number;
+      endTime: number;
+    }> = [];
+
     if (fileRecord.fileType === 'text') {
-      // For text files, decode base64 and extract text
-      const textContent = Buffer.from(fileRecord.base64Data, 'base64').toString('utf-8');
-      extractedContent = textContent.substring(0, 5000); // Limit to first 5000 chars
-    } else if (fileRecord.fileType === 'video' || fileRecord.fileType === 'audio') {
-      // In production, this would use speech-to-text services
-      extractedContent = generateMockTranscription(fileRecord.fileName);
+      // For text files, extract text content directly
+      extractedContent = fileBuffer.toString('utf-8').substring(0, 10000);
+      
+      // Create mock speaker turns for text content
+      const sentences = extractedContent.split(/[.!?]+/).filter(s => s.trim().length > 10);
+      speakerTurns = sentences.map((sentence, index) => ({
+        speaker: 'Reader',
+        text: sentence.trim(),
+        startTime: index * 3,
+        endTime: (index + 1) * 3,
+      }));
+
+    } else if (fileRecord.fileType === 'video') {
+      // Extract audio from video
+      console.log('Extracting audio from video...');
+      const audioResult = await audioProcessingService.extractAudioFromVideo(fileBuffer);
+      
+      if (!audioResult.success || !audioResult.audioBuffer) {
+        throw new Error(audioResult.error || 'Failed to extract audio from video');
+      }
+
+      // Transcribe the extracted audio
+      console.log('Transcribing extracted audio...');
+      const transcriptionResult = await speechToTextService.transcribeAudio(
+        audioResult.audioBuffer,
+        {
+          language: fileRecord.language,
+          includeTimestamps: true,
+        }
+      );
+
+      if (!transcriptionResult.success) {
+        throw new Error(transcriptionResult.error || 'Failed to transcribe audio');
+      }
+
+      extractedContent = transcriptionResult.transcription || '';
+
+      // Convert transcription segments to speaker turns
+      if (transcriptionResult.segments) {
+        const speakerSegments = await speechToTextService.identifySpeakers(transcriptionResult.segments);
+        speakerTurns = speechToTextService.extractConversationTurns(speakerSegments);
+      }
+
+    } else if (fileRecord.fileType === 'audio') {
+      // Process audio file for optimal transcription
+      console.log('Processing audio file...');
+      const audioResult = await audioProcessingService.processAudioFile(fileBuffer);
+      
+      if (!audioResult.success || !audioResult.audioBuffer) {
+        throw new Error(audioResult.error || 'Failed to process audio file');
+      }
+
+      // For large audio files, split into chunks
+      const audioBuffer = audioResult.audioBuffer;
+      const duration = audioResult.duration || 0;
+
+      if (duration > 600) { // More than 10 minutes
+        console.log('Splitting large audio file into chunks...');
+        const chunks = await audioProcessingService.splitAudioIntoChunks(audioBuffer);
+        const transcriptionResult = await speechToTextService.transcribeAudioChunks(
+          chunks,
+          { language: fileRecord.language }
+        );
+
+        if (!transcriptionResult.success) {
+          throw new Error(transcriptionResult.error || 'Failed to transcribe audio chunks');
+        }
+
+        extractedContent = transcriptionResult.transcription || '';
+
+        // Convert segments to speaker turns
+        if (transcriptionResult.segments) {
+          const speakerSegments = await speechToTextService.identifySpeakers(transcriptionResult.segments);
+          speakerTurns = speechToTextService.extractConversationTurns(speakerSegments);
+        }
+
+      } else {
+        // Transcribe single audio file
+        console.log('Transcribing audio file...');
+        const transcriptionResult = await speechToTextService.transcribeAudio(
+          audioBuffer,
+          {
+            language: fileRecord.language,
+            includeTimestamps: true,
+          }
+        );
+
+        if (!transcriptionResult.success) {
+          throw new Error(transcriptionResult.error || 'Failed to transcribe audio');
+        }
+
+        extractedContent = transcriptionResult.transcription || '';
+
+        // Convert segments to speaker turns
+        if (transcriptionResult.segments) {
+          const speakerSegments = await speechToTextService.identifySpeakers(transcriptionResult.segments);
+          speakerTurns = speechToTextService.extractConversationTurns(speakerSegments);
+        }
+      }
     }
 
-    // Generate conversation structure
-    const conversations = await generateConversationsFromContent(
+    // Analyze content and generate learning materials
+    console.log('Analyzing content for learning materials...');
+    const analysisResult = await contentAnalysisService.analyzeContent(
       extractedContent,
+      speakerTurns,
       fileRecord.language,
       fileRecord.cefrLevel
-    );    // Store processed content (in memory for demo)
-    // In production, save to database
+    );
+
+    // Store processed content and conversations
+    // In production, save to database using Prisma
     console.log(`File processing completed: ${fileRecord.fileName}`);
-    console.log(`Generated ${conversations.length} conversation segments`);
+    console.log(`Generated ${analysisResult.conversations.length} conversation segments`);
+    console.log(`Extracted ${analysisResult.vocabulary.length} vocabulary items`);
+    console.log(`Suggested CEFR level: ${analysisResult.suggestedCefrLevel}`);
+    console.log(`Identified topics: ${analysisResult.topics.join(', ')}`);
+
+    // TODO: Save to database
+    // await prisma.fileRecord.update({
+    //   where: { id: fileRecord.id },
+    //   data: {
+    //     processingStatus: 'completed',
+    //     extractedContent,
+    //     conversations: {
+    //       create: analysisResult.conversations
+    //     },
+    //     metadata: {
+    //       vocabulary: analysisResult.vocabulary,
+    //       grammarPatterns: analysisResult.grammarPatterns,
+    //       topics: analysisResult.topics,
+    //       suggestedCefrLevel: analysisResult.suggestedCefrLevel,
+    //     }
+    //   }
+    // });
 
   } catch (error) {
     console.error('File processing error:', error);
-    // Update status to failed
+    
+    // TODO: Update status to failed in database
+    // await prisma.fileRecord.update({
+    //   where: { id: fileRecord.id },
+    //   data: {
+    //     processingStatus: 'failed',
+    //     errorMessage: error instanceof Error ? error.message : 'Unknown processing error'
+    //   }
+    // });
   }
 }
 
-function generateMockTranscription(fileName: string): string {
-  // Mock transcription for demo purposes
-  return `This is a mock transcription of the uploaded file "${fileName}". In a production environment, this would be the actual audio or video content transcribed using speech-to-text services like Google Cloud Speech API, Azure Speech Services, or AWS Transcribe. The transcription would maintain speaker identification, timestamps, and conversation flow to enable effective language learning.`;
-}
 
-async function generateConversationsFromContent(
-  content: string,
-  language: string,
-  cefrLevel: string
-): Promise<ConversationSegment[]> {
-  // Simple conversation segmentation
-  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 10);
-  const conversations = [];
-
-  // Group sentences into conversation segments
-  for (let i = 0; i < sentences.length; i += 3) {
-    const segment = sentences.slice(i, i + 3).join('. ').trim();
-    if (segment) {
-      conversations.push({
-        id: `conv_${Date.now()}_${i}`,
-        title: `Conversation Segment ${Math.floor(i / 3) + 1}`,
-        content: segment,
-        language,
-        cefrLevel,
-        difficulty: calculateDifficulty(segment),
-        vocabulary: extractVocabulary(segment),
-        createdAt: new Date(),
-      });
-    }
-  }
-
-  return conversations;
-}
-
-function calculateDifficulty(text: string): number {
-  // Simple difficulty calculation based on text complexity
-  const words = text.split(' ').length;
-  const avgWordLength = text.split(' ').reduce((sum, word) => sum + word.length, 0) / words;
-  
-  if (avgWordLength < 4 && words < 20) return 1; // A1
-  if (avgWordLength < 5 && words < 40) return 2; // A2
-  if (avgWordLength < 6 && words < 60) return 3; // B1
-  if (avgWordLength < 7 && words < 80) return 4; // B2
-  return 5; // C1+
-}
-
-function extractVocabulary(text: string): string[] {
-  // Extract potentially difficult words
-  const words = text.toLowerCase().match(/\b\w+\b/g) || [];
-  return [...new Set(words)]
-    .filter(word => word.length > 5)
-    .slice(0, 10);
-}

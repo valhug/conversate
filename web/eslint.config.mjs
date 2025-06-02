@@ -16,6 +16,11 @@ const eslintConfig = [
       "src/generated/**",
       "src/generated/prisma/**",
       "**/generated/**",
+      ".next/**",
+      "out/**",
+      "dist/**",
+      "build/**",
+      "node_modules/**",
     ],
   },
 ];
